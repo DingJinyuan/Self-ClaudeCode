@@ -1,0 +1,42 @@
+一、入门基础测试（先验证基础工具能不能正常跑通）
+文件读取测试
+plaintext
+Read the content of tool_system.py and briefly summarize the core function of this file
+作用：调用 read_file 工具读取源码，验证文件工具执行 + 结果回传给模型总结，基础闭环生效。
+待办 Todo 工具测试
+plaintext
+Create a todo list for code repair: 1.Fix circular import between tool_system and sub_agent; 2.Test MCP docs service; 3.Verify cron background task
+作用：触发 todo_write 工具，检验 todo 全局变量写入、工具执行逻辑。
+文件检索 glob 测试
+plaintext
+List all .py files in the current project directory
+作用：调用glob遍历项目文件，校验路径安全校验 safe_path 函数正常。
+二、MCP 服务专项测试（你之前卡住的核心场景）
+连接 docs MCP + 搜索
+plaintext
+First connect the docs MCP server, then search keyword: agent loop react agent workflow
+完整流程预期：先调用connect_mcp连接 docs → 自动刷新全局工具池，生成mcp__docs__search工具 → 模型二次调用 MCP 搜索工具返回 Mock 结果。
+2. 查看 deploy 服务版本
+plaintext
+Connect deploy MCP server, use its get_version tool to query service version
+三、任务系统 + 子 Agent 工具测试
+创建任务
+plaintext
+Create a new task, subject: Python repo full inspection, description: Check all import errors and test all built-in tools
+调用create_task，验证任务持久化模块。
+2. 启动子 Agent（task 工具）
+plaintext
+Spawn a sub-agent to scan all Python files in this project and list all module filenames
+会调用task工具拉起子代理，验证懒加载的spawn_subagent可以正常执行。
+四、进阶后台 / 定时 / 队友通信测试
+后台耗时任务测试
+plaintext
+Use bash to list all folders in the workspace, run this task in background
+会判定为后台任务，丢入线程异步执行，立刻返回后台启动提示，后续自动推送结果通知。
+2. Cron 定时任务创建
+plaintext
+Create a one-shot cron reminder, execute once after 2 minutes, prompt content: Check whether the MCP service connection is normal
+调用schedule_cron定时工具，后台 cron 线程到时自动触发任务注入。
+五、上下文压缩测试
+plaintext
+Read all lines of main.py completely, then trigger the compact tool to compress the conversation context
