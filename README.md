@@ -1,402 +1,645 @@
-Comprehensive Agent 系统功能说明
-一、系统概述
-是一个功能完整的 AI 编程助手系统，基于 Anthropic Claude API 构建，具备工具调用、任务管理、多智能体协作、定时调度、上下文压缩等企业级能力。
+# Comprehensive Agent 系统完整详细功能说明书 V1.0（全源码配套完整版）
 
-核心定位：一个可自主执行编程任务、支持团队协作的 AI Agent 框架。
+## 一、系统概述
 
-二、系统架构
-text
+### 1.1 系统定义
+
+Comprehensive Agent 是一套**全自研模块化企业级 AI 编程智能体框架**，底层基于 Anthropic Claude API 深度开发，完整落地原生 Function Calling 工具调用、带依赖拓扑的持久化任务管理、常驻多智能体团队协作、标准 Linux Cron 定时调度、五级阶梯上下文分级压缩、前置钩子全链路权限管控、指数退避 + 模型自动降级异常容灾、Git Worktree 代码环境物理隔离、MCP 第三方服务插件扩展、一次性子代理轻量化执行全套工程级能力。
+
+本系统区别于普通对话问答程序，可自主拆解复杂软件开发需求、执行编码调试、并行多分支开发、无人值守定时运维、跨 Agent 方案审批分工，完整支撑单人本地开发、多智能体团队协同开发、自动化运维三大核心场景，是一套开箱即用的生产级 AI Agent 底座。
+
+### 1.2 核心设计理念
+
+1. 模块完全解耦
+
+   所有功能按业务拆分为独立 Python 文件，低耦合高内聚，可单独新增功能、替换大模型、扩展第三方 MCP 服务，无需改动 CLI 主循环核心逻辑，便于二次开发与维护。
+
+2. 全链路持久化存储
+
+   任务台账、定时 Cron 配置、Agent 收发消息、完整会话对话日志、长期记忆全部落地本地磁盘 JSON/JSONL 文件，程序关闭、进程重启、会话销毁后数据永久留存，不会内存丢失。
+
+3. **双智能体执行模式**
+
+- 临时子 SubAgent：同步一次性执行，用完即销毁，上下文完全隔离，适合专项批量文件处理、独立脚本运算；
+- 常驻 Teammate 队友线程：后台长期守护值守，自主扫描认领任务，拥有专属隔离代码工作区，适配长期团队分工协作。
+
+1. 多层纵深安全防护
+
+   高危命令黑名单完全拦截、路径逃逸严格检测、破坏性操作人工二次确认、PreToolUse 前置钩子全局统一权限拦截、MCP 高危部署工具二次授权，全流程操作可控，杜绝高危操作误执行。
+
+2. 五级上下文扩容机制
+
+   阶梯式压缩策略 + 超大工具输出文件落盘存储，从根源突破大模型 Token 上下文窗口长度限制，长会话、海量日志场景稳定运行。
+
+3. 企业级高可用容灾
+
+   接口指数退避重试、429 限流专属重试逻辑、529 服务过载自动切换备用降级模型、上下文超长应急强制压缩兜底，长时间批量任务、7×24 小时定时任务运行稳定性极强。
+
+### 1.3 四层分层整体架构
+
+自上而下分层执行，每层职责边界清晰，CLI 终端主循环驱动整套系统完整闭环运行：
+
+```
 ┌─────────────────────────────────────────────────────────────┐
-│                     CLI 交互主循环                          │
+│                     CLI 交互主循环（入口交互层）              │
 ├─────────────────────────────────────────────────────────────┤
-│  提示词组装  →  LLM推理  →  工具执行  →  结果回写          │
+│  提示词组装  →  LLM推理  →  工具执行  →  结果回写（核心推理执行层） │
 ├─────────────────────────────────────────────────────────────┤
-│  上下文压缩  │  权限钩子  │  后台任务  │  定时调度          │
+│  上下文压缩  │  权限钩子  │  后台任务  │  定时调度（性能安全中台层） │
 ├─────────────────────────────────────────────────────────────┤
-│  任务管理    │  工作树    │  队友协作  │  MCP扩展           │
+│  任务管理    │  工作树    │  队友协作  │  MCP扩展（工程业务能力层）   │
 └─────────────────────────────────────────────────────────────┘
-三、核心功能模块
-1. 内置工具系统
-工具名	功能	说明
-bash	执行 Shell 命令	支持后台运行、慢速任务自动异步
-read_file	读取文件	支持行偏移、行数限制
-write_file	写入/覆盖文件	自动创建父目录
-edit_file	精确文本替换	单次替换，原子操作
-glob	文件匹配搜索	限定工作目录内
-todo_write	待办清单管理	支持 pending/in_progress/completed
-task	启动子代理	一次性专项任务执行
-load_skill	加载技能	动态加载 SKILL.md 定义
-2. 任务管理系统
-持久化任务 (Task Graph)
+```
 
-python
-# 任务实体
-Task {
-    id: string          # 唯一标识
-    subject: string     # 标题
-    description: string # 描述
-    status: pending | in_progress | completed
-    owner: string       # 归属Agent
-    blockedBy: list     # 前置依赖任务ID
-    worktree: string    # 绑定的工作树
-}
-功能清单：
+1. 入口交互层（CLI 交互主循环）
 
-✅ 创建任务（create_task）
+   唯一人机交互入口，终端控制台接收用户键盘输入指令，实时彩色打印运行日志、任务状态、审批提醒，接收人工二次确认、方案审批、终止指令，同步调度底层所有模块协同执行。内置 readline 优化，输入内容不会被后台日志刷新覆盖，交互体验流畅。
 
-✅ 查看所有任务（list_tasks）
+2. 核心推理执行层
 
-✅ 获取任务详情（get_task）
+   系统核心运行闭环，动态实时拼接系统角色 Prompt、长期记忆文件、历史会话上下文、当前技能与 MCP 服务状态，调用 Claude 模型推理解析 tool_use 工具调用指令，路由至对应工具处理器执行，将工具执行结果标准化回填对话上下文，完成一轮完整思考与执行闭环。
 
-✅ 认领任务（claim_task）
+3. 性能安全中台层
 
-✅ 完成任务（complete_task）
+   全局通用底层支撑能力，负责上下文长度节流分级压缩、全生命周期事件钩子与前置权限校验、慢速 Shell 命令自动后台异步执行、Cron 定时任务后台线程常驻秒级调度，为上层业务模块提供稳定、安全、高性能的底层公共能力。
 
-✅ 任务依赖关系（blockedBy）
+4. 工程业务能力层
 
-设计理念：
+   面向项目开发落地的上层业务模块，实现带前置依赖的任务拓扑管理、Git Worktree 独立代码环境物理隔离、多 Agent 本地文件消息总线异步进程通信、标准化审批协议流程、第三方 MCP 服务插件化扩展，直接服务项目并行开发与多智能体团队协作。
 
-磁盘持久化（.tasks/task_*.json）
+### 1.4 项目完整目录结构介绍
 
-跨会话保留
+```
+ComprehensiveAgent/
+├── .env                      # 环境配置文件（存放API密钥、模型名称、代理地址）
+├── main.py                   # 程序主入口、CLI交互主线程、全局主循环
+├── config.py                 # 全局常量、路径、阈值、模型、全局状态变量、线程锁
+├── models.py                 # 数据实体类：CronJob、ProtocolState、MCPClient 数据模型
+├── hooks_permission.py       # 钩子系统 + PreToolUse前置权限校验、日志钩子
+├── error_recovery.py         # LLM异常处理、指数退避重试、429/529降级、超长上下文判断
+├── background_task.py        # 后台异步bash任务管理、线程创建、结果回收通知
+├── compact_context.py        # 五级上下文分级压缩、会话存档、超大输出落盘
+├── cron_scheduler.py         # Cron定时表达式解析、后台调度线程、任务持久化读写
+├── tool_system.py            # 内置全部工具实现、工具注册表、执行分发、路径安全校验
+├── task_worktree.py          # Task持久任务拓扑 + Git Worktree工作树隔离全套逻辑
+├── skill_manager.py          # skills技能目录扫描、SKILL.md解析、技能加载与查看
+├── subagent.py               # 一次性同步子代理，轻量化独立执行专项任务
+├── message_bus.py            # 文件JSONL消息总线，多Agent收件箱读写底层实现
+├── protocol_core.py          # 审批协议、请求ID生成、收发应答匹配、队友通信协议
+├── teammate_runtime.py       # 常驻队友后台线程、空闲轮询、自动认领任务、消息处理
+├── mcp_client.py             # MCP客户端连接池、Mock服务、工具名格式化、合并全局工具池
+# 自动生成运行目录（程序启动自动创建）
+├── skills/                   # 自定义技能存放目录
+│   └── 技能文件夹/SKILL.md    # 每个技能独立文件夹，SKILL.md携带角色规则yaml元数据
+├── .memory/
+│   └── MEMORY.md             # 长期记忆文件，每轮Prompt自动读取注入
+├── .transcripts/             # 会话完整存档目录，压缩时原始对话jsonl日志存放
+├── .task_outputs/
+│   └── tool-results/         # L1超大工具输出落地txt文件目录
+├── .tasks/                   # 持久任务台账，task_xxx.json任务文件
+├── .worktrees/               # Git Worktree隔离工作区总目录，存放各任务独立代码环境
+│   └── events.jsonl          # Worktree创建/删除操作日志
+├── .mailboxes/               # 多Agent收件箱目录，lead.jsonl、队友名.jsonl消息文件
+└── .scheduled_tasks.json    # Cron定时任务持久化存储文件，重启自动加载
+```
 
-支持多 Agent 认领分工
+## 二、全局配置模块 config.py 完整详解
 
-3. Git Worktree 工作树隔离
-功能：为每个任务创建独立的代码工作区
+### 2.1 核心作用
 
-bash
-# 创建隔离工作树
-create_worktree(name="feature-auth", task_id="task_xxx")
+全局统一管控**路径常量、模型参数、压缩阈值、重试规则、权限黑白名单、全局线程状态容器**，所有模块统一读取配置参数，集中管理便于调试修改，程序启动自动加载`.env`环境变量，自动创建全部业务目录。
 
-# 目录结构
-.worktrees/
-├── feature-auth/          # 独立工作目录
-│   └── (代码文件)
-└── events.jsonl           # 操作日志
-工具清单：
+### 2.2 目录规划（程序启动自动创建）
 
-create_worktree — 创建隔离工作区
+|           目录路径            |                         详细用途说明                         |
+| :---------------------------: | :----------------------------------------------------------: |
+|           `skills/`           | 自定义技能仓库目录，子文件夹对应单个技能，内部`SKILL.md`携带 YAML 元数据与技能规则，程序启动自动扫描注册至全局注册表 |
+|        `.transcripts/`        | 完整会话存档目录，上下文压缩时原始完整对话以时间戳 JSONL 文件永久保存，支持后续历史会话完整回放还原 |
+| `.task_outputs/tool-results/` | 超大工具结果落地目录，单条输出超过阈值自动写入本地 txt 文件，上下文仅存放文件路径 + 内容预览，大幅缩减 Token 占用 |
+|           `.tasks/`           | 持久任务台账目录，以独立 JSON 文件存储每一条 Task 任务，实现跨会话任务留存、依赖判定、多 Agent 认领 |
+|         `.worktrees/`         | Git Worktree 工作树根目录，为每一个任务创建独立 wt 前缀分支与专属工作区，代码环境完全物理隔离，并行开发互不污染主干 |
+|         `.mailboxes/`         | 多 Agent 消息总线收件箱目录，每个队友 Agent 对应独立`xxx.jsonl`收件箱文件，基于本地文件实现跨线程异步通信 |
+|          `.memory/`           | 长期记忆存储目录，`MEMORY.md`永久记录项目全局记忆信息，每一轮 Prompt 组装时自动读取注入系统提示词 |
+|    `.scheduled_tasks.json`    | Cron 定时任务持久化文件，JSON 格式存储所有定时任务配置，程序重启自动加载调度任务，持久任务永久生效 |
 
-remove_worktree — 删除工作区（含变更保护）
+### 2.3 关键配置参数详解
 
-keep_worktree — 保留供人工审阅
+#### 1. LLM 模型配置
 
-安全特性：
+**client**为 Anthropic API 全局客户端实例，区分主模型**PRIMARY_MODEL**、降级备用模型**FALLBACK_MODEL**；Token 上限分为常规**DEFAULT_MAX_TOKENS=8000**，超长场景可自动升级**ESCALATED_MAX_TOKENS=16000**。
 
-名校验（仅允许 [A-Za-z0-9._-]）
+#### 2. 错误恢复与重试参数
 
-变更保护（存在未提交文件时拒绝删除）
+单次接口最大重试次数**MAX_RETRIES=3**，连续 2 次 529 服务过载自动切换备用模型**MAX_CONSECUTIVE_529=2**，指数退避基础延迟**BASE_DELAY_MS=500**毫秒，单次重试最大等待时长强制封顶 32 秒。
 
-分支隔离（每个工作树对应 wt/xxx 分支）
+#### 3. 上下文压缩阈值
 
-4. 多智能体协作系统
-4.1 队友线程 (Teammate)
-python
-# 启动一个常驻队友
-spawn_teammate(
-    name="backend-dev",
-    role="后端开发",
-    prompt="负责用户认证模块开发"
-)
-队友特性：
+全局上下文字符总上限**CONTEXT_LIMIT=50000**，仅永久保留最近 3 条完整工具执行结果**KEEP_RECENT_TOOL_RESULTS=3**，单条工具输出超过30000字符自动落地文件持久化。
 
-✅ 独立后台线程运行
+#### 4.安全权限配置
 
-✅ 自主认领任务
+**DENY_LIST**永久禁止高危命令：**rm -rf /、sudo、shutdown、reboot、mkfs、dd** 等系统级高危指令，命中直接拒绝执行；
+**DESTRUCTIVE**高风险操作：**rm**删除文件、写入/etc/系统目录、**chmod 777**全局权限修改，触发后必须人工输入 y/N 二次确认，拒绝则直接终止工具执行。
 
-✅ 隔离工作目录
+#### 5.正则安全校验规则
 
-✅ 自主工具调用
+Worktree 名称正则限制仅允许大小写字母、数字、下划线、英文点、短横线，长度 1~64 位；MCP 服务名校验过滤非法特殊字符，规避命名漏洞。
 
-✅ 方案审批流程
+#### 6.全局线程安全容器
 
-4.2 消息总线 (Message Bus)
-基于 JSONL 文件的异步通信：
+后台异步任务池、定时任务注册表、活跃常驻队友注册表、待审批协议请求池全部全局统一管理，配套专属线程锁，严格规避多线程并发读写字典、列表造成的数据错乱。
 
-text
-.mailboxes/
-├── lead.jsonl          # 主控收件箱
-├── backend-dev.jsonl   # 队友收件箱
-└── frontend-dev.jsonl
-通信协议：
+## 三、核心功能模块完整详细说明
 
-message — 普通消息
+### 3.1 全局工具系统 tool_system.py
 
-shutdown_request — 关机请求
+整套编程专用标准化原生工具集，所有工具内置参数校验、路径白名单、异常捕获、跨 Worktree 工作目录适配，工具定义存入`BUILTIN_TOOLS`，执行函数映射至`BUILTIN_HANDLERS`处理器字典，统一路由分发调用，同时支持 MCP 外部工具自动合并进工具池。
 
-plan_approval_request — 方案审批请求
+|                           工具名称                           |         核心功能         |                      完整能力与执行规则                      |
+| :----------------------------------------------------------: | :----------------------: | :----------------------------------------------------------: |
+|                             bash                             |   执行 Shell 终端命令    | 适配 Linux/macOS 完整常规终端指令，内置慢速命令自动识别机制，编译、安装、测试类命令自动判定后台异步执行；可手动传入`run_in_background=True`强制后台运行，执行前经过 PreToolUse 权限钩子高危命令拦截，支持自定义 Worktree 工作目录执行路径。 |
+|                          read_file                           |         文件读取         | 支持指定行偏移 offset、读取行数 limit 限制，防止一次性读取超大文件撑满上下文；严格路径安全校验，禁止`../`路径逃逸读取系统敏感文件，自动截断超长返回内容。 |
+|                          write_file                          |     文件写入 / 覆盖      | 自动递归创建不存在的父级文件夹，写入前校验路径合法性，禁止写入系统根目录，默认 UTF-8 编码，返回写入字节统计结果。 |
+|                          edit_file                           |     精准局部文本替换     | 原子化单次区块替换，仅替换目标 old_text 内容，不全量重写文件，避免整文件误删，匹配不到目标文本直接返回明确错误。 |
+|                             glob                             |      通配符文件搜索      | 标准 glob 通配语法检索源码、配置文件，搜索范围严格锁定当前 Worktree 工作目录，过滤跨目录非法匹配结果。 |
+|                          todo_write                          |     会话内存待办清单     | 内置`pending/in_progress/completed`三态状态，数据存放运行内存，仅当前会话生效，用于本轮 Agent 步骤拆分，轻量化快速跟进当下步骤。 |
+|                             task                             |     启动一次性子代理     | 生成临时隔离子 Agent，独立执行专项任务，仅开放基础文件与 bash 工具，执行完成自动销毁，上下文完全隔离，不会污染主会话对话，仅返回最终总结摘要。 |
+|                          load_skill                          |    动态加载自定义技能    | 读取 skills 目录 SKILL.md 配置，将专属角色规则、权限、执行流程注入当前会话，实现功能模块化插拔扩展。 |
+|                           compact                            |  手动触发全局上下文压缩  | 主动执行 L4 重量级 LLM 摘要压缩，存档完整会话日志，精简历史对话，适用于会话过长主动瘦身。 |
+| create_task / list_tasks / get_task / claim_task / complete_task | 持久化任务全生命周期管理 | 磁盘 JSON 持久化任务台账，支持创建带前置依赖的任务、全量查看、查询详情、Agent 认领、标记完成，自动解锁后置依赖任务。 |
+|           schedule_cron / list_crons / cancel_cron           |    Cron 定时任务管理     | 创建标准 5 位 Cron 定时任务，区分循环 / 单次执行、持久 / 会话临时存储，支持查看全量任务、按需取消指定定时任务。 |
+|                        spawn_teammate                        |     拉起常驻后台队友     | 创建独立守护线程的 Agent，自定义角色、初始提示词，自主认领匹配角色的全局任务，拥有专属隔离 Worktree 工作目录。 |
+|                  send_message / check_inbox                  |       队友消息收发       | 基于文件消息总线，向指定队友发送文本消息、主动读取自身收件箱所有消息。 |
+|        request_shutdown / request_plan / review_plan         |     审批协议全套工具     | 主控下发队友关机指令、要求队友提交开发方案、审批方案同意 / 驳回并附带反馈，完成多 Agent 标准化审批流程。 |
+|      create_worktree / remove_worktree / keep_worktree       |      Git 工作树管理      | 创建绑定任务的隔离分支工作区、删除工作树（未提交变更强制保护）、标记目录为人工审阅长期保留。 |
+|                         connect_mcp                          |    连接 MCP 外部服务     | 连接内置 Mock 的 docs 文档、deploy 部署服务，自动扫描服务工具，合并至全局工具池，以`mcp__服务名__工具名`命名调用。 |
 
-plan_approval_response — 审批回执
+#### 核心底层函数说明
 
-4.3 审批协议 (Protocol)
-text
-┌────────┐  提交方案   ┌────────┐
-│ 队友   │ ──────────→ │  Lead  │
-│        │  等待审批   │        │
-│        │ ←────────── │ 审批   │
-└────────┘  回执      └────────┘
-工具清单：
+1. `safe_path()`路径安全函数：自动解析绝对物理路径，强制判定目标路径是否在当前工作目录内，直接拦截路径逃逸，是文件类工具的安全底层保障；
+2. `call_tool_handler()`通用执行分发器：统一解包工具入参，捕获参数错误、运行时异常，标准化返回错误信息；
+3. `has_tool_use()`工具调用判定：精准识别模型返回内容中的 tool_use 区块，作为进入工具执行分支的判断依据；
+4. `lazy_spawn_subagent()`懒加载子代理：仅在调用 task 工具时才导入 subagent 模块，减少程序初始化内存开销。
 
-send_message — 发送消息给队友
+### 3.2 后台异步任务模块 background_task.py
 
-check_inbox — 查看收件箱
+#### 核心定位
 
-request_shutdown — 请求队友关机
+自动识别 bash 慢速命令，自动创建守护后台线程异步执行，主线程 CLI 完全不阻塞等待，统一管理全局后台任务 ID、运行状态、执行结果，主线程轮询批量采集已完成任务结果，生成标准化`<task_notification>`通知文本送入 LLM 上下文，让模型实时感知后台任务执行状态。
 
-request_plan — 请求队友提交方案
+#### 核心完整逻辑
 
-review_plan — 审批方案
+1. 慢速命令判定规则`is_slow_operation`仅针对 bash 命令做小写匹配，命中关键词**install/build/test/deploy/compile/docker build/pip install/npm install/pytest/make**，判定为耗时慢速任务，自动转入后台执行。
 
-5. 定时任务系统 (Cron)
-支持标准 5 位 Cron 表达式：
+2. 任务启动`start_background_task`
 
-字段	范围	说明
-minute	0-59	分钟
-hour	0-23	小时
-dom	1-31	日期
-month	1-12	月份
-dow	0-6	星期
-功能特性：
+   自增计数器生成**bg_0001**格式全局唯一任务 ID，创建 daemon 守护线程执行工具逻辑，执行前后完触发PreToolUse/PostToolUse 全链路钩子，通过background_lock线程锁安全写入全局background_tasks状态池、background_results结果池，控制台彩色打印后台启动日志。
 
-✅ 标准 Cron 表达式（支持 *、*/N、,、-）
+3. 结果批量回收`collect_background_results`
 
-✅ 单次执行 (recurring=false)
+   主线程每轮推理自动轮询，筛选状态为completed的后台任务，取出任务 ID、执行命令、结果预览（超长结果截断），自动弹出内存缓存防止内存堆积，生成标准通知消息追加至对话上下文。
 
-✅ 持久化存储（重启不丢失）
+#### 业务优势
 
-✅ 后台调度线程（秒级扫描）
+解决长耗时编译、依赖安装命令阻塞主循环问题，主线程可同步下达新指令，后台任务结果自动闭环推送通知，所有后台执行日志统一落地`.task_outputs`目录，支持后续完整结果回溯查看。
 
-✅ 任务队列消费
+### 3.3 五级上下文分级压缩模块 compact_context.py
 
-工具清单：
+针对 LLM 上下文超长、Token 超限 API 报错问题，设计**由轻到重五级阶梯式逐级触发压缩策略**，严格保证 tool_use 调用与 tool_result 结果的绑定完整性，绝对不会拆分工具调用链路；完整原始对话永久写入`.transcripts`存档，压缩内容仅为送入模型的会话数据，原始记录永久可回溯。
 
-schedule_cron — 创建定时任务
+#### 五级压缩策略明细
 
-list_crons — 查看所有任务
+|       压缩等级        |                           执行策略                           |                         精准触发条件                         |                         底层实现逻辑                         |
+| :-------------------: | :----------------------------------------------------------: | :----------------------------------------------------------: | :----------------------------------------------------------: |
+|   L1 超大结果持久化   | 超长工具输出落地本地 txt 文件，上下文仅保留文件路径 + 内容预览 |         单条工具返回结果＞30KB（PERSIST_THRESHOLD）          | `persist_large_output`函数将超大文本写入`tool-results`目录，上下文用`<persisted-output>`占位符替代，从源头直接缩减上下文体积。 |
+| L2 旧工具结果精简占位 | 仅保留最近 N 条完整工具结果，更早历史工具结果替换为精简占位文本 |  全局工具执行记录总数超过 3 条（KEEP_RECENT_TOOL_RESULTS）   | `micro_compact`函数，对早期过期工具结果替换为提示文本，仅保留最新完整执行记录，兼顾历史溯源能力与上下文长度控制。 |
+|  L3 中段消息智能裁剪  | 固定保留头部初始化对话 + 完整尾部最新会话，中间冗余内容使用占位消息替换 |                  全局对话总消息条数＞50 条                   | `snip_compact`函数，内置核心保护规则：自动修正裁剪下标，严禁拆分 tool_use 调用与配套 tool_result 结果，杜绝工具上下文逻辑断裂。 |
+|  L4 LLM 全局摘要压缩  | 压缩前存档完整原始会话，调用模型提炼全局核心信息，上下文整体替换为精简摘要 |        上下文总字符长度＞全局上限 CONTEXT_LIMIT=50000        | `compact_history`函数，提炼项目目标、修改文件、剩余待办任务、用户约束等核心内容，大幅精简长期会话体量。 |
+|  L5 应急被动兜底压缩  | API 抛出上下文超限报错时强制应急压缩，保留末尾最新 5 条完整对话 + 全局摘要 | 接口返回`context_length_exceeded`、prompt too long 等 Anthropic 官方超长报错 | `reactive_compact`应急函数，即便摘要生成异常，依旧保留最新会话内容兜底，保障程序不会直接崩溃退出。 |
 
-cancel_cron — 取消任务
+#### 配套辅助能力
 
-示例：
+1. 会话持久存档：`write_transcript`将每轮完整对话写入时间戳命名的 JSONL 文件，永久存档；
+2. 消息类型判定工具：内置`message_has_tool_use`、`is_tool_result_message`精准区分模型调用消息与工具返回消息，为裁剪、压缩提供精准判断依据；
+3. `estimate_size`字符长度估算函数，实时统计上下文体量，作为压缩触发的量化依据。
 
-python
-# 每分钟执行一次
-schedule_cron(cron="* * * * *", prompt="检查服务状态")
+### 3.4 钩子与权限管控模块 hooks_permission.py
 
-# 明天 9:30 执行一次
-schedule_cron(cron="30 9 * * *", prompt="发送日报", recurring=False)
-6. 后台异步任务
-自动识别慢速命令：
+基于事件埋点的回调钩子架构，在程序固定执行节点预留回调点位，**无需修改主流程、无需改动各工具源码**，即可挂载权限校验、日志审计、输入检测、超大输出告警等自定义逻辑，分为四大核心钩子事件，执行优先级：拦截钩子＞日志钩子。
 
-python
-# 自动后台运行
-install, build, test, deploy, compile,
-docker build, pip install, npm install,
-cargo build, pytest, make
-工作原理：
+#### 四大钩子事件与触发时机
 
-检测到慢速命令 → 启动后台线程
+1. `UserPromptSubmit`：用户提交输入指令瞬间触发，默认打印当前工作目录日志，可便捷扩展敏感词审计、输入内容过滤、用户操作日志留存；
+2. `PreToolUse`：工具执行**前置触发（全局核心权限关卡）**，执行完整权限校验流水线，高危操作直接拦截；
+3. `PostToolUse`：工具执行完成后置触发，默认检测超大输出并打印黄色告警日志，可扩展执行结果校验、结果备份、耗时统计；
+4. `Stop`：本轮 Agent 完整推理循环结束触发，统计本轮工具调用总次数，用于运行日志统计、会话收尾清理。
 
-立即返回任务 ID
+#### PreToolUse 权限校验完整流水线
 
-主线程继续工作
+1. Bash 命令黑名单校验：命中`DENY_LIST`完全禁止命令，直接返回拒绝理由终止执行；命中`DESTRUCTIVE`破坏性命令，弹出人工二次确认，用户拒绝则直接拦截；
+2. 文件读写路径逃逸校验：解析路径真实物理绝对地址，强制判定是否在项目工作根目录范围内，直接拦截`../`跨目录跳转、绝对路径访问系统文件；
+3. MCP 高危工具校验：以`mcp__`开头的第三方 deploy 部署类工具，强制人工确认后方可执行，防范外部部署高危操作。
 
-完成后注入结果通知
+#### 钩子运行机制
 
-python
-# 手动后台运行
-bash(command="npm install", run_in_background=True)
-# 返回: [Background task bg_0001 started]
-7. 上下文压缩系统
-五级压缩策略：
+`register_hook`完成回调函数注册，`trigger_hooks`按注册顺序串行执行所有回调函数，**任意钩子返回非 None 字符串，代表本次执行被拦截，终止后续所有钩子与工具运行**，权限拦截拥有最高执行优先级。
 
-级别	策略	触发条件
-1	超大工具结果落地文件	>30KB
-2	老旧工具结果精简占位	>3条结果
-3	中段消息裁剪	>50条消息
-4	LLM 摘要压缩	>50KB
-5	应急被动压缩	API 报错超长
-特性：
+### 3.5 Cron 定时调度模块 cron_scheduler.py
 
-✅ 自动保护工具调用链完整性
+完整兼容 Linux 标准 5 位 Cron 表达式，实现定时任务表达式严格校验、持久化 JSON 存储、后台守护线程秒级常驻调度、任务队列主线程消费、增删查全套管理能力，程序重启自动加载本地持久化任务，单任务异常不会造成整个调度线程崩溃。
 
-✅ 完整对话存档（.transcripts/）
+#### 5 位 Cron 字段标准规范
 
-✅ 超大输出持久化（.task_outputs/tool-results/）
+| 字段顺序 | 取值范围 |      字段含义      |                   完整支持语法                   |
+| :------: | :------: | :----------------: | :----------------------------------------------: |
+|  minute  |   0~59   |        分钟        | `*`通配、`*/N`间隔周期、`,`多值枚举、`-`数值区间 |
+|   hour   |   0~23   |        小时        |                       同上                       |
+|   dom    |   1~31   |      每月日期      |                       同上                       |
+|  month   |   1~12   |        月份        |                       同上                       |
+|   dow    |   0~6    | 星期（0 代表周日） |                       同上                       |
 
-8. 权限与钩子系统
-8.1 权限管控
-高危命令黑名单：
+#### 核心功能详解
 
-python
-DENY_LIST = ["rm -rf /", "sudo", "shutdown", "reboot", "mkfs", "dd if="]
-DESTRUCTIVE = ["rm ", "> /etc/", "chmod 777"]
-拦截策略：
+1. **表达式严格校验`validate_cron`**：逐字段校验格式合法性、数值取值范围，非法表达式直接返回精准错误信息（字段名称 + 错误原因），不会生成无效定时任务；
+2. **持久化读写机制**：`save_durable_jobs`将标记 durable=True 的任务写入`.scheduled_tasks.json`，`load_durable_jobs`程序启动自动读取加载本地任务，重启配置不丢失；
+3. **后台调度线程`cron_scheduler_loop`**：每秒扫描当前系统时间，匹配 Cron 表达式 + 当前分钟未触发过的任务，推入全局`cron_queue`执行队列；单次执行任务触发完成后自动从注册表删除，循环任务永久保留；单个任务捕获异常仅打印日志，不崩溃调度主线程；
+4. **主线程消费队列`consume_cron_queue`**：主循环每轮自动取出队列内待执行定时任务，将任务 Prompt 模拟用户指令送入 LLM 执行推理；
+5. 配套对外工具：`schedule_cron`创建定时任务（区分循环 recurring / 单次执行、持久 durable / 会话临时）、`list_crons`格式化查看全量任务、`cancel_cron`根据任务 ID 取消指定定时任务。
 
-完全禁止 → 直接拒绝
+### 3.6 错误恢复模块 error_recovery.py
 
-破坏性操作 → 二次确认
+专门负责 Anthropic LLM 接口调用的异常捕获、差异化重试策略、服务过载自动降级、上下文超长异常精准识别，配套`RecoveryState`全局状态类，完整记录本轮调用的全部容灾状态，实现全链路高可用。
 
-路径逃逸 → 拒绝
+#### 1. 指数退避重试算法`retry_delay`
 
-MCP 部署工具 → 二次确认
+基础延迟 500ms，按照`2^尝试次数`指数递增，单次最大延迟强制锁定 32 秒，附加 0~25% 随机时间抖动，完美规避多请求同时重试造成的接口请求雪崩问题。
 
-8.2 钩子事件
-事件	触发时机	用途
-UserPromptSubmit	用户提交输入	日志、审计
-PreToolUse	工具执行前	权限校验、拦截
-PostToolUse	工具执行后	日志、大输出告警
-Stop	本轮循环结束	统计、清理
-9. 技能系统 (Skills)
-目录结构：
+#### 2. 差异化异常重试逻辑`with_retry`
 
-text
-skills/
-├── code-review/
-│   └── SKILL.md         # 包含 YAML Frontmatter
-├── pdf-processing/
-│   └── SKILL.md
-└── agent-builder/
-    └── SKILL.md
-SKILL.md 格式：
+- 429 请求频率限流：执行指数退避完整重试流程，达到最大重试次数后抛出最终异常；
+- 529 服务过载繁忙：累计连续过载次数，连续 2 次过载自动切换预设备用降级模型`FALLBACK_MODEL`，重置计数后继续重试；
+- 其余业务语法、参数异常：不执行重试，直接向上抛出异常，交由上层逻辑处理。
 
-markdown
----
-name: code-review
-description: 代码审查与审计
----
+#### 3. 上下文超长异常判定`is_prompt_too_long_error`
 
-# Code Review Skill
+精准匹配 Anthropic 官方超长报错关键字，作为触发 L5 应急被动压缩的唯一判定条件，精准触发兜底压缩流程。
 
-## 使用场景
-...
-工具：
+#### 4. RecoveryState 状态实体
 
-list_skills — 查看所有可用技能
+全程跟随单次 LLM 调用生命周期，完整记录：是否升级 Token 上限、上下文恢复重试次数、连续 529 过载计数、是否执行应急压缩、当前正在使用的模型，完整掌控整套容灾流程状态。
 
-load_skill(name) — 加载完整技能内容
+### 3.7 数据模型 models.py
 
-10. MCP 扩展系统
-内置 Mock 服务：
+系统所有结构化实体的数据类定义，全局统一规范数据格式，用于序列化 JSON 持久化、跨模块参数传递、类型约束。
 
-服务名	工具	说明
-docs	search, get_version	文档查询
-deploy	trigger, status	部署管理
-工具命名规范：
+1. `CronJob`：定时任务实体，包含唯一任务 ID、Cron 表达式、执行 Prompt、循环标记、持久化标记；
+2. `ProtocolState`：审批协议实体，记录请求 ID、发起 Agent、方案内容、创建时间、审批结果、审批备注，完整支撑多 Agent 方案审批流程；
+3. `MCPClient`：MCP 客户端实体，管理第三方扩展服务名称、注册工具列表、工具执行处理器，封装远程工具调用逻辑。
 
-text
-mcp__{服务名}__{工具名}
-例: mcp__docs__search
-使用方式：
+### 3.8 一次性子代理 subagent.py
 
-python
-# 连接 MCP 服务
-connect_mcp(name="docs")
+#### 核心特性
 
-# 调用工具
-mcp__docs__search(query="API 参考")
-11. 子代理系统 (Subagent)
-特性：
+同步阻塞执行、用完即销毁、无常驻后台线程、无权访问队友协议 / 定时 / MCP 等高级工具，可被主 Agent、常驻 Teammate 内部调用，专门执行专项文件、Shell 批量任务。
 
-✅ 一次性同步执行
+1. 权限隔离：仅开放 bash、read_file、write_file、edit_file、glob 五类基础工具，完全屏蔽团队协作、定时调度、外部 MCP 等高级能力，权限最小化保障安全；
+2. 独立系统 Prompt：固定轻量化子代理身份，要求完成任务后仅输出精简最终总结，禁止多余解释；
+3. 执行上限：内置最大 30 轮工具循环，防止死循环卡死主线程，执行完毕自动销毁全部上下文，只将最终结果摘要返回主程序，轻量化不占用常驻资源。
 
-✅ 用完即销毁
+#### 适用场景
 
-✅ 只开放基础工具（bash/read/write/edit/glob）
+批量代码查找替换、日志批量解析、独立脚本编译运行、大型代码重构等独立专项任务。
 
-✅ 隔离上下文（不污染主对话）
+### 3.9 技能管理系统 skill_manager.py
 
-✅ 返回最终摘要
+技能模块化插拔扩展体系，`skills`目录为统一技能仓库，每个技能文件夹内置`SKILL.md`配置文件，文件头部 YAML Frontmatter 定义技能名称、描述，正文定义角色规则、使用场景、权限约束、完整执行流程。
 
-使用场景：
+1. `scan_skills()`：程序启动自动全盘扫描 skills 文件夹，解析元数据，刷新全局`SKILL_REGISTRY`技能注册表；
+2. `list_skills()`：格式化返回全部可用技能列表文本，每轮系统 Prompt 自动注入技能清单，告知模型可加载的技能名称；
+3. `load_skill(name)`：根据技能名称读取完整 SKILL.md 全文内容，注入当前会话上下文，动态加载专属技能规则。
 
-专项文件处理
+### 3.10 Git Worktree + Task 持久任务系统 task_worktree.py
 
-独立脚本执行
+#### 一、Task 持久任务拓扑系统
 
-大型代码重构
+分为两层任务体系：
 
-四、错误恢复机制
-1. 指数退避重试
-尝试次数	等待时间
-1	0.5s + 抖动
-2	1.0s + 抖动
-3	2.0s + 抖动
-4	4.0s + 抖动
-...	上限 32s
-2. 自动降级
-text
-连续 2 次 529 过载 → 自动切换到备用模型
-3. 容灾状态
-python
-RecoveryState {
-    has_escalated: bool              # 是否已升级 Token 上限
-    recovery_count: int              # 恢复重试次数
-    consecutive_529: int             # 连续 529 计数
-    has_attempted_reactive_compact: bool  # 是否已应急压缩
-    current_model: string            # 当前使用的模型
-}
-五、快速开始
-安装依赖
-bash
+1. **todo_write 内存临时待办**：仅限当前会话内存生效，轻量化读写，用于 Agent 当下步骤拆分，紧盯短期执行步骤；
+2. **Task 磁盘持久化任务图**：`.tasks`目录 JSON 文件永久存储，支持前置依赖拓扑、多 Agent 跨会话认领分工，面向长期工程项目全局统筹。
+
+##### Task 实体完整字段
+
+```
+class Task:
+    id: str                  # 全局唯一任务ID（时间戳+随机数生成）
+    subject: str             # 任务简短标题
+    description: str         # 任务详细需求、验收标准
+    status: str              # pending(待认领) / in_progress(进行中) / completed(已完成)
+    owner: str | None        # 认领归属的Agent名称
+    blockedBy: list[str]     # 前置依赖任务ID列表，依赖未完成则任务锁定不可认领
+    worktree: str | None     # 绑定对应的专属Worktree工作树名称，任务与代码环境一一绑定
+```
+
+##### 完整能力
+
+`create_task`创建带依赖任务、`list_tasks`全量查看任务、`get_task`查询完整详情、`claim_task`认领空闲任务（前置依赖自动校验）、`complete_task`标记任务完成，自动解锁所有后置依赖任务。
+
+#### 二、Git Worktree 环境隔离系统
+
+依托 Git 原生 worktree 能力，为每一个开发任务绑定独立 wt/xxx 前缀分支与专属工作目录，目录统一存放于`.worktrees/`，多任务并行开发代码完全隔离，不会污染主干分支代码。
+
+1. 核心操作：
+
+   **create_worktree：**创建专属隔离工作区，自动生成 wt 前缀独立分支，可直接绑定对应任务 ID；
+
+   **remove_worktree：**删除工作树，默认安全模式：目录存在未提交文件 / 本地 Commit 时直接拒绝删除，防止开发成果丢失，可开启discard_changes=True强制销毁；
+
+   **keep_worktree：**标记目录长期保留，用于人工审阅，不会被自动清理。
+
+2. 安全校验：目录名校验严格限制字符格式，杜绝非法字符与路径穿越；每个工作树绑定独立分支，分支与工作目录一一对应，严格分支隔离。
+
+### 3.11 多常驻队友协作 teammate_runtime.py + message_bus.py + protocol_core.py
+
+#### 1. 底层消息总线 message_bus.py
+
+基于本地 JSONL 文件实现异步进程通信，无需开启网络端口，每个 Agent 拥有独立收件箱文件，线程安全读写。
+
+- `send()`：向指定 Agent 收件箱追加写入消息，支持自定义消息类型、元数据 request_id；
+- read_inbox()：读取当前 Agent 全部收件消息，读取完成自动清空收件箱，避免消息重复消费；全局唯一 BUS 总线实例，支撑整套队友通信底层。
+- 标准消息类型：普通 message 消息、shutdown_request 关机请求、plan_approval_request 方案审批申请、各类 response 回执消息。
+
+#### 2. 常驻队友 Teammate 运行时
+
+`spawn_teammate`启动独立后台守护线程，自定义角色（后端开发 / 前端开发等）与专属初始 Prompt，核心特性：
+
+1. 独立后台线程常驻运行，自主轮询全局任务池，自动认领匹配自身角色、前置依赖就绪的 pending 空闲任务；
+2. 认领任务后自动绑定专属 Worktree 工作目录，后续所有文件、bash 操作自动锁定当前隔离目录；
+3. 拥有精简专属工具集，自主调用工具完成开发工作，核心技术方案必须提交主控 Lead 审批，审批通过方可落地执行；
+4. 实时轮询自身收件箱，处理普通业务消息、关机指令、审批回执，收到合法 shutdown 请求后，主动回复回执，优雅终止线程。
+
+#### 3. 标准化审批协议 protocol_core.py
+
+基于 request_id 唯一请求 ID 精准匹配请求与回执，杜绝消息错配：
+
+1. 队友侧：`_teammate_submit_plan`提交开发方案，生成唯一请求 ID，发送审批请求至 Lead 收件箱，进入全局待审批请求池；
+2. 主控 Lead 侧工具：`request_plan`要求队友提交方案、`review_plan`审批方案（同意 / 驳回 + 反馈意见）、`request_shutdown`下发队友关机指令；
+3. `consume_lead_inbox`自动读取主控收件箱，自动解析协议回执，匹配对应请求状态，完成审批全流程闭环。
+
+### 3.12 MCP 扩展系统 mcp_client.py
+
+第三方服务插件化扩展体系，内置 docs 文档查询、deploy 部署两大 Mock 模拟服务，可便捷对接真实第三方 MCP 服务。
+
+1. 命名规范：MCP 工具统一格式`mcp__{服务名}__{工具名}`，自动合并进入全局工具池，模型可直接像原生工具一样调用；
+2. `connect_mcp(name)`：连接指定 MCP 服务，自动扫描服务全部工具定义与执行 Handler，存入全局`mcp_clients`客户端连接池；
+3. `assemble_tool_pool()`：每轮推理自动合并内置原生工具 + 所有已连接 MCP 工具，实时同步最新可用外部工具；
+4. 权限联动：`mcp__deploy__`部署类工具会触发 PreToolUse 钩子二次人工确认，高危操作权限可控。
+
+## 四、主入口 main.py 完整运行流程
+
+### 整体线程架构
+
+1. **主线程（CLI 前台交互线程）**：接收用户键盘输入、串行执行用户指令的`agent_loop`主推理循环、处理队友收件消息、控制台界面展示，全局`agent_lock`互斥锁，保证同一时间仅有一套推理逻辑执行；
+2. **后台子线程（Cron 调度守护线程）**：独立常驻后台秒级轮询时间，定时任务触发时争抢全局锁执行推理，自动将定时任务指令注入对话上下文，实现无人值守自动化定时执行。
+
+### 一轮 agent_loop 主循环完整闭环流程
+
+1. 系统事件注入阶段
+
+   ① 取出 Cron 队列命中的定时任务，模拟用户指令写入对话；
+
+   ② 自注入本轮执行完毕的后台异步任务结果通知，让模型感知后台任务状态；
+
+   ③ 每 3 轮推理自动插入提醒，提示模型及时维护 todo 待办清单。
+
+2. 上下文预处理流水线（顺序固定不可调换）
+
+   tool_result_budget 超大结果落地持久化 → snip_compact 中段消息裁剪 → micro_compact 精简老旧工具结果 → 全局字符超限则执行 L4 摘要压缩，严格管控上下文长度。
+
+3. 动态刷新运行环境
+
+   实时读取长期记忆、活跃队友列表、已连接 MCP 服务，重新组装完整系统 Prompt，同步刷新最新工具池。
+
+4. 带容灾重试的 LLM 调用call_llm 内置指数退避重试、529 模型降级逻辑，异常分支处理：
+
+   - 上下文超长报错：未执行应急压缩则执行 L5 强制压缩，重新走循环；
+   - max_tokens 输出截断：首次自动升级 Token 上限，多次续写失败则结束本轮推理。
+
+5. 模型回复两大分支
+
+   ① 无 tool_use 工具调用：普通文本回答，触发 Stop 收尾钩子，本轮推理正常结束；
+
+   ② 携带 tool_use 工具调用，进入工具执行分支。
+
+6. 精细化工具执行逻辑
+
+   - 手动 compact 指令：立即执行全局压缩，重启新一轮循环；
+   - PreToolUse 钩子拦截：权限不足直接返回拦截结果；
+   - 慢速 bash 命令：后台异步启动，即刻返回后台任务启动通知；
+   - 常规同步工具：即时执行，执行前后触发前后置钩子，记录运行结果。
+
+7. 工具结果回写上下文
+
+   本轮所有工具执行结果标准化封装为 user 消息，写入 messages 对话列表，回到循环开头，开启下一轮模型思考。
+
+### 程序启动与 CLI 交互流程
+
+1. 初始化全局配置、自动创建所有目录、扫描加载技能、启动 Cron 后台调度线程；
+2. 进入永久 CLI 输入循环，接收用户输入，q/exit/ 空行即可正常退出程序；
+3. 用户输入指令追加至对话历史，加锁执行完整 Agent 推理循环，推理完成仅打印本轮新增模型输出；
+4. 自动读取 Lead 主控收件箱队友消息，将队友通信内容写入上下文，模型可处理协作回执。
+
+## 五、系统运行前置环境要求
+
+1. **操作系统**：原生适配 Linux/macOS 系统，Windows 平台必须使用 WSL2 Linux 子系统运行；
+2. **Python 依赖**：执行`pip install anthropic python-dotenv pyyaml`完成依赖安装；
+3. **密钥配置**：项目根目录`.env`文件配置合法 Anthropic API Key、主模型 ID、备用降级模型 ID、API 代理 Base 地址；
+4. **环境依赖**：本地 Git 完整安装，Worktree 工作树模块强依赖 Git 原生能力；
+5. **权限说明**：高危破坏性 Shell 命令、MCP 部署操作会主动触发人工二次确认，从操作源头保障安全可控。
+
+## 六、系统核心综合优势
+
+1. **标准模块化架构**：功能文件完全拆分解耦，二次开发、新增工具、替换 LLM 模型、扩展 MCP 第三方服务极其便捷；
+2. **全量数据持久化**：任务台账、定时配置、Agent 通信消息、完整会话日志、长期记忆全部落地磁盘，程序重启所有数据完整保留；
+3. **原生多智能体协作能力**：常驻后台队友自主值守、自动认领任务、异步文件消息总线通信、标准化审批协议，原生支撑团队 AI 分工协作；
+4. **多层纵深安全防护**：前置全局权限钩子、高危命令黑白名单、路径逃逸拦截、高危操作人工二次确认，全流程操作安全可控；
+5. **极致上下文性能优化**：五级阶梯分级压缩 + 超大文件落盘存储 + 慢速命令后台异步执行，从底层突破 LLM 上下文窗口长度限制；
+6. **企业级高可用容灾**：指数退避重试机制、429 限流专属重试、529 服务过载自动切换备用模型、超长上下文应急兜底压缩，可稳定长时间 7×24 小时运行。
+
+## 七、版本信息
+
+文档版本：V1.2
+
+最后更新日期：2026-06-23
+
+完整配套源码清单：
+
+`main.py`、`config.py`、`background_task.py`、`compact_context.py`、`hooks_permission.py`、`error_recovery.py`、`cron_scheduler.py`、`tool_system.py`、`task_worktree.py`、`skill_manager.py`、`subagent.py`、`message_bus.py`、`protocol_core.py`、`teammate_runtime.py`、`mcp_client.py`、`models.py`。
+
+## 八、运行命令
+
+## 一、前置环境安装命令
+
+### 1. 安装 Python 依赖包
+
+```
+# 基础依赖
 pip install anthropic python-dotenv pyyaml
-配置环境变量
-bash
-# .env
-ANTHROPIC_API_KEY=sk-xxx
-MODEL_ID=claude-3-5-sonnet-20241022
-FALLBACK_MODEL_ID=claude-3-opus-20240229
-ANTHROPIC_BASE_URL=https://api.anthropic.com
-运行
-bash
-python code.py
-交互示例
-text
- yuan >> 帮我创建一个任务：实现用户登录功能
- yuan >> 创建一个工作树用于开发
- yuan >> schedule_cron cron="30 9 * * *" prompt="发送日报" recurring=false
- yuan >> spawn_teammate name="前端开发" role="前端" prompt="开发登录页面"
-六、文件结构
-text
- yuan_comprehensive/
-├── code.py                    # 主程序入口（所有功能整合）
-├── config.py                  # 全局配置
-├── tool_system.py             # 工具系统核心
-├── hooks_permission.py        # 权限与钩子系统
-├── background_task.py         # 后台任务管理
-├── compact_context.py         # 上下文压缩
-├── cron_scheduler.py          # 定时调度
-├── error_recovery.py          # 错误恢复
-├── mcp_client.py              # MCP 客户端
-├── message_bus.py             # 消息总线
-├── protocol_core.py           # 协作协议
-├── skill_manager.py           # 技能管理
-├── sub_agent.py               # 子代理
-├── task_worktree.py           # 任务与工作树
-├── teammate_runtime.py        # 队友运行时
-├── models.py                  # 数据模型
-├── .env                       # 环境变量
-├── skills/                    # 技能目录
-├── .tasks/                    # 任务持久化
-├── .worktrees/                # 工作树目录
-├── .mailboxes/                # 消息邮箱
-├── .memory/                   # 长期记忆
-└── .transcripts/              # 对话存档
-七、系统优势
-特性	说明
-模块化	各功能独立模块，易于扩展
-持久化	任务、记忆、对话全部落地磁盘
-协作	支持多 Agent 团队协作
-安全	权限钩子、路径校验、命令黑名单
-可靠	指数退避、自动降级、异常恢复
-高效	上下文压缩、后台任务、定时调度
-八、注意事项
-运行环境：设计为 Linux/macOS，Windows 需使用 WSL2
+# 如需readline终端优化（Linux/macOS）
+pip install readline
+```
 
-API Key：需要有效的 Anthropic API Key
+Windows (WSL) 同样执行以上 pip 命令即可。
 
-Git 依赖：Worktree 功能需要 Git 已安装
+### 2. 前置 Git 环境（Worktree 模块必备）
 
-权限：部分操作需要用户交互确认
+```
+# 查看Git版本，验证是否安装成功
+git --version
+```
 
-文档版本: 1.0 | 最后更新: 2026-06-23
+未安装则自行安装 Git，Windows 用 WSL 自带 Git，Linux：`apt install git` / macOS：`brew install git`
+
+## 二、程序启动主命令
+
+### 前台交互式启动（日常主用）
+
+```
+# 进入项目根目录
+cd 你的项目根文件夹路径
+# 直接运行入口文件
+python main.py
+```
+
+启动成功后出现提示符 `yuan >>`，即可输入任务指令。
+
+### 后台常驻运行（Linux 服务器 7×24 挂机）
+
+```
+# 使用nohup后台运行，日志输出到agent.log，关闭终端不退出
+nohup python main.py > agent.log 2>&1 &
+# 查看运行日志
+tail -f agent.log
+# 查看后台进程
+ps -ef | grep python
+# 终止后台进程
+kill -9 进程PID
+```
+
+## 三、程序内交互式常用工具指令（yuan >> 提示符内输入）
+
+### 1. 基础文件 & Shell 工具
+
+```
+# 执行shell命令
+bash command="ls -l src"
+# 读取文件
+read_file path="main.py"
+# 写入文件
+write_file path="test.txt" content="hello agent"
+# 全局文件检索
+glob pattern="*.py"
+```
+
+### 2. 待办清单管理
+
+```
+todo_write todos=[{"content":"完成接口开发","status":"in_progress"},{"content":"单元测试","status":"pending"}]
+```
+
+### 3. 持久任务 Task 全套指令
+
+```
+# 创建任务（带前置依赖）
+create_task subject="用户登录模块开发" description="完成后端登录接口" blockedBy=["task_xxxx"]
+# 查看全部任务
+list_tasks
+# 查看任务详情
+get_task task_id="task_xxx"
+# 认领待执行任务
+claim_task task_id="task_xxx"
+# 完成任务
+complete_task task_id="task_xxx"
+```
+
+### 4. Git Worktree 环境隔离命令
+
+```
+# 创建工作树，绑定指定任务
+create_worktree name=login-dev task_id=task_xxx
+# 查看/保留工作树
+keep_worktree name=login-dev
+# 删除工作树（有修改会拦截）
+remove_worktree name=login-dev
+# 强制删除丢弃改动
+remove_worktree name=login-dev discard_changes=true
+```
+
+### 5. Cron 定时任务指令（标准 5 位 cron）
+
+```
+# 每分钟巡检，循环任务
+schedule_cron cron="* * * * *" prompt="检查后端服务进程状态"
+# 明日早上9点30分一次性执行生成日报
+schedule_cron cron="30 9 * * *" prompt="汇总今日开发进度，生成日报文档" recurring=false
+# 查看所有定时任务
+list_crons
+# 取消定时任务
+cancel_cron job_id="cron_xxxxxx"
+```
+
+### 6. 多队友 Agent 协作指令
+
+```
+# 新建常驻后端队友
+spawn_teammate name=backend-dev role="后端开发工程师" prompt="负责接口与数据库开发"
+# 给队友发消息
+send_message to=backend-dev content="请完成用户表设计"
+# 查看主控收件箱消息
+check_inbox
+# 要求队友提交方案
+request_plan teammate=backend-dev task="登录接口开发"
+# 审批方案（通过/驳回）
+review_plan request_id=req_xxxxxx approve=true feedback="方案无误，可以执行"
+# 下发关机指令
+request_shutdown teammate=backend-dev
+```
+
+### 7. MCP 服务连接、子代理、技能加载
+
+```
+# 连接内置Mock MCP服务
+connect_mcp name=docs
+connect_mcp name=deploy
+# 启动一次性子代理执行专项任务
+task description="批量读取config.py，梳理所有配置参数"
+# 查看技能列表、加载技能
+list_skills
+load_skill name=sql_dev
+# 手动主动压缩上下文
+compact
+```
+
+## 四、退出程序命令
+
+在交互提示符内输入任意一个即可：
+
+```
+q
+exit
+# 或者快捷键 Ctrl + C / Ctrl + D
+```
+
+## 五、调试辅助命令（终端执行）
+
+```
+# 查看定时任务持久化配置文件
+cat .scheduled_tasks.json
+# 查看任务目录
+ls .tasks/
+# 查看消息总线收件箱
+ls .mailboxes/
+# 查看会话压缩存档日志
+ls .transcripts/
+# 查看超大工具输出文件
+ls .task_outputs/tool-results/
+```
